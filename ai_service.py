@@ -12,7 +12,7 @@ def _get_config():
     }
 
 
-def _call_ai(system_prompt: str, user_prompt: str) -> str:
+def _call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> str:
     cfg = _get_config()
     if not cfg["api_key"]:
         raise RuntimeError("AI_API_KEY not configured")
@@ -24,7 +24,7 @@ def _call_ai(system_prompt: str, user_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": 800,
+        "max_tokens": max_tokens,
     }).encode()
 
     req = Request(
@@ -37,12 +37,33 @@ def _call_ai(system_prompt: str, user_prompt: str) -> str:
     )
 
     try:
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
-            return data["choices"][0]["message"]["content"].strip()
     except HTTPError as e:
         detail = e.read().decode()
         raise RuntimeError(f"AI request failed: {e.code} — {detail}")
+
+    choices = data.get("choices", [])
+    if not choices:
+        raise RuntimeError("AI returned no choices")
+
+    for i, choice in enumerate(choices):
+        content = (choice.get("message", {}) or {}).get("content", "")
+        if content and content.strip():
+            finish_reason = choice.get("finish_reason", "unknown")
+            if finish_reason == "length":
+                raise RuntimeError(
+                    "AI response was truncated (max_tokens limit). "
+                    "The recipe may be too complex — try again or simplify the input."
+                )
+            return content.strip()
+
+    finish_reasons = [c.get("finish_reason", "?") for c in choices]
+    raise RuntimeError(
+        f"AI returned empty content in all {len(choices)} choice(s) "
+        f"(finish_reasons={finish_reasons}). "
+        "Try again — the model may have refused or the response was filtered."
+    )
 
 
 METHOD_SYSTEM_PROMPT = """You are an expert mixologist and cocktail writer. When given a cocktail recipe, write detailed, professional preparation steps. Follow these guidelines strictly:
@@ -90,7 +111,7 @@ Base spirit: {cocktail_data.get('base_spirit', 'not specified')}
 
 Write the preparation method."""
 
-    return _call_ai(METHOD_SYSTEM_PROMPT, user_prompt)
+    return _call_ai(METHOD_SYSTEM_PROMPT, user_prompt, max_tokens=2000)
 
 
 def generate_tags(cocktail_data: dict) -> list[str]:
@@ -105,7 +126,7 @@ Ingredients: {ingredients_text}
 
 Generate tags."""
 
-    result = _call_ai(TAGS_SYSTEM_PROMPT, user_prompt)
+    result = _call_ai(TAGS_SYSTEM_PROMPT, user_prompt, max_tokens=200)
     try:
         tags = json.loads(result)
         if isinstance(tags, list):
