@@ -130,3 +130,108 @@ Generate tags."""
     except json.JSONDecodeError:
         pass
     return [t.strip().strip('"').strip("'") for t in result.strip("[]").split(",") if t.strip()]
+
+
+SUGGEST_SYSTEM_PROMPT = """You are an expert mixologist. You are given a list of available ingredients, glassware, and accessories from someone's home bar. Suggest 2-4 classic or creative cocktails they can make right now using ONLY the items listed.
+
+For each suggestion, provide:
+- name: The cocktail name
+- base_spirit: The main spirit category (e.g., "Gin", "Whiskey", "Rum")
+- ingredients: Array of {name: string, amount: number, unit: "ml"} — use ONLY ingredient names from the available list
+- glass: The glassware name from the available list (or suggest "Rocks Glass" / "Coupe" if the bar has it)
+- method: Detailed preparation steps (in Portuguese, numbered, with specific technique details)
+- garnish: Garnish suggestion
+- tags: Array of 3-5 strings describing the cocktail (in Portuguese)
+
+Return ONLY a JSON array of cocktail objects. No intro, no outro, no markdown fences.
+
+Example format:
+[{"name":"Negroni","base_spirit":"Gin","ingredients":[{"name":"London Dry Gin","amount":30,"unit":"ml"},{"name":"Sweet Vermouth","amount":30,"unit":"ml"},{"name":"Campari","amount":30,"unit":"ml"}],"glass":"Rocks Glass","method":"1. Fill a mixing glass with ice.\\n2. Add all ingredients.\\n3. Stir for 20 seconds.\\n4. Strain into a rocks glass over a large ice cube.\\n5. Express an orange peel over the surface and drop it in.","garnish":"Orange peel","tags":["amargo","clássico","boozy","italiano"]}]"""
+
+
+def suggest_cocktails(available_items: list[dict]) -> list[dict]:
+    ingredients_list = []
+    glasses_list = []
+    accessories_list = []
+
+    for item in available_items:
+        name = item.get("name", "unknown")
+        category = item.get("category", "")
+        it_name = (item.get("ingredient_type") or {}).get("name", "")
+        label = it_name or name
+
+        if category == "glass":
+            glasses_list.append(name)
+        elif category == "accessory":
+            accessories_list.append(name)
+        else:
+            ingredients_list.append(f"- {label} ({name})")
+
+    user_prompt = f"""Available ingredients:
+{chr(10).join(ingredients_list) if ingredients_list else '(none)'}
+
+Available glassware:
+{chr(10).join(f'- {g}' for g in glasses_list) if glasses_list else '(none)'}
+
+Available accessories:
+{chr(10).join(f'- {a}' for a in accessories_list) if accessories_list else '(none)'}
+
+Suggest cocktails I can make right now."""
+
+    result = _call_ai(SUGGEST_SYSTEM_PROMPT, user_prompt)
+    try:
+        suggestions = json.loads(result)
+        if isinstance(suggestions, list):
+            return suggestions
+    except json.JSONDecodeError:
+        pass
+
+    cleaned = result.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines)
+    try:
+        suggestions = json.loads(cleaned)
+        if isinstance(suggestions, list):
+            return suggestions
+    except json.JSONDecodeError:
+        pass
+
+    raise RuntimeError(f"AI returned unparseable response: {result[:200]}...")
+
+
+FILTER_SYSTEM_PROMPT = """You are given a list of suggested cocktails and a list of cocktails that already exist in someone's collection. Remove any suggestion that is essentially the same drink as an existing one — same name (including translations and variants), or same core ingredient combination.
+
+Return ONLY a JSON array of the remaining suggestions (the unique ones). If all are duplicates, return an empty array [].
+
+Do NOT modify the cocktail objects — just remove duplicates. Do NOT add any explanation."""
+
+
+def filter_duplicates(suggestions: list[dict], existing_names: list[str]) -> list[dict]:
+    if not existing_names:
+        return suggestions
+
+    suggestions_json = json.dumps(suggestions, ensure_ascii=False, indent=2)
+    existing_str = "\n".join(f"- {n}" for n in existing_names)
+
+    user_prompt = f"""Existing cocktails:
+{existing_str}
+
+Suggested cocktails:
+{suggestions_json}
+
+Return only the unique suggestions (those not already in the existing list)."""
+
+    result = _call_ai(FILTER_SYSTEM_PROMPT, user_prompt)
+    try:
+        filtered = json.loads(result)
+        if isinstance(filtered, list):
+            return filtered
+    except json.JSONDecodeError:
+        pass
+
+    return suggestions

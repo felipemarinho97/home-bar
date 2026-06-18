@@ -846,3 +846,157 @@ async function aiGenerateTags() {
   } catch (err) { toast(err.message, true); }
   finally { btn.disabled = false; btn.innerHTML = '&#x2728; Generate Tags'; }
 }
+
+async function aiSuggestCocktails() {
+  const btn = document.querySelector('#tab-cocktails .btn.secondary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Thinking...'; }
+
+  try {
+    const result = await api('/ai/suggest-cocktails', { method: 'POST', body: '{}' });
+    showSuggestionsModal(result.suggestions);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#x2728; Suggest'; }
+  }
+}
+
+function showSuggestionsModal(suggestions) {
+  if (!suggestions || !suggestions.length) {
+    toast('No suggestions returned', true);
+    return;
+  }
+
+  const cards = suggestions.map((s, i) => `
+    <div class="item-card" style="flex-direction:column;align-items:flex-start;gap:0.6rem">
+      <div>
+        <div class="item-name">${esc(s.name)}</div>
+        <div class="item-meta">${esc(s.base_spirit || '')}${s.tags?.length ? ' · ' + s.tags.map(esc).join(', ') : ''}</div>
+      </div>
+      <div style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5">
+        ${(s.ingredients || []).map(ing => `${ing.amount || ''}${ing.unit || 'ml'} ${esc(ing.name)}`).join('<br>')}
+        ${s.glass ? `<br><span style="color:var(--text-muted)">Taça: ${esc(s.glass)}</span>` : ''}
+        ${s.garnish ? `<br><span style="color:var(--text-muted)">Garnish: ${esc(s.garnish)}</span>` : ''}
+      </div>
+      <button class="btn primary small" onclick="createSuggestedCocktail(${i})">Create this cocktail</button>
+    </div>
+  `).join('');
+
+  openModal(`
+    <h4>AI Suggestions</h4>
+    <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1rem">Based on your current inventory, you could make:</p>
+    <div style="display:grid;gap:0.6rem;max-height:60vh;overflow-y:auto">${cards}</div>
+    <div class="form-actions" style="margin-top:1rem">
+      <button type="button" class="btn secondary" onclick="closeModal()">Close</button>
+    </div>
+  `);
+
+  window.__lastSuggestions = suggestions;
+}
+
+async function createSuggestedCocktail(index) {
+  const s = window.__lastSuggestions?.[index];
+  if (!s) return;
+  closeModal();
+
+  const ingredientTypes = window.__ingredientTypesCache || [];
+  let foundTypes = [];
+  try {
+    foundTypes = await api('/ingredient-types');
+    window.__ingredientTypesCache = foundTypes;
+  } catch (_) {}
+
+  const ingredients = (s.ingredients || []).map(ing => {
+    const match = foundTypes.find(t =>
+      t.name.toLowerCase() === (ing.name || '').toLowerCase()
+    );
+    return { ingredient_type_id: match?.id, ingredient_type_name: ing.name, amount: ing.amount, unit: ing.unit || 'ml' };
+  });
+
+  openModal(`
+    <h4>✨ ${esc(s.name)}</h4>
+    <form onsubmit="saveSuggestedCocktail(event)">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" name="name" value="${esc(s.name)}" required>
+      </div>
+      <div class="form-group">
+        <label>Base Spirit</label>
+        <input type="text" name="base_spirit" value="${esc(s.base_spirit || '')}">
+      </div>
+      <div class="form-group">
+        <label>Method</label>
+        <textarea name="method">${esc(s.method || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Garnish</label>
+        <input type="text" name="garnish" value="${esc(s.garnish || '')}">
+      </div>
+      <div class="form-group">
+        <label>Tags (comma separated)</label>
+        <input type="text" name="tags" value="${(s.tags || []).join(', ')}">
+      </div>
+      <div class="form-group">
+        <label>Ingredients</label>
+        <div id="ingredient-lines" class="ingredient-lines">
+          ${ingredients.map((ing, i) => `
+            <div class="ingredient-line" data-index="${i}">
+              <select name="ing_type_${i}" class="ing-type-select" onchange="rebuildSubPills(this)">
+                <option value="">-- Select --</option>
+                ${foundTypes.map(t => `<option value="${t.id}" ${t.id === ing.ingredient_type_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+              </select>
+              <input type="number" name="ing_amt_${i}" value="${ing.amount || ''}" placeholder="Amt" step="any" style="max-width:70px">
+              <input type="text" name="ing_unit_${i}" value="${ing.unit || 'ml'}" placeholder="Unit" style="max-width:70px">
+              <button type="button" class="btn danger small" onclick="this.closest('.ingredient-line').remove()">\u00d7</button>
+              <button type="button" class="sub-toggle" onclick="openSubsModal(this)" data-index="${i}">+ subs</button>
+              <div class="sub-pills hidden" id="sub-pills-${i}"></div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn primary">Create Cocktail</button>
+      </div>
+    </form>
+  `);
+
+  window.__ingredientTypesCache = foundTypes;
+}
+
+async function saveSuggestedCocktail(e) {
+  e.preventDefault();
+  const form = e.target;
+  const ingredientLines = form.querySelectorAll('#ingredient-lines .ingredient-line');
+  const ingredients = [];
+  ingredientLines.forEach(line => {
+    const typeSelect = line.querySelector('.ing-type-select');
+    if (!typeSelect?.value) return;
+    const amtInput = line.querySelector('[name^="ing_amt_"]');
+    const unitInput = line.querySelector('[name^="ing_unit_"]');
+    ingredients.push({
+      ingredient_type_id: parseInt(typeSelect.value),
+      amount: amtInput?.value ? parseFloat(amtInput.value) : null,
+      unit: unitInput?.value || 'ml',
+      substitute_type_ids: [],
+    });
+  });
+
+  const body = {
+    name: form.name.value,
+    method: form.method.value || null,
+    garnish: form.garnish.value || null,
+    base_spirit: form.base_spirit.value || null,
+    tags: form.tags.value ? form.tags.value.split(',').map(s => s.trim()).filter(Boolean) : [],
+    ingredients,
+    glasses: [],
+    accessories: [],
+  };
+
+  try {
+    await api('/cocktails', { method: 'POST', body: JSON.stringify(body) });
+    closeModal();
+    toast('Cocktail created!');
+    loadCocktails();
+  } catch (err) { toast(err.message, true); }
+}
