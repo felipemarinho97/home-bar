@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Home Bar — Menu</title>
+  <link rel="stylesheet" href="/static/menu.css">
+</head>
+<body>
+  <header>
+    <div class="header-bar">
+      <h1>Home Bar</h1>
+      <button id="refresh-btn" class="icon-btn" title="Refresh">&#x21bb;</button>
+    </div>
+    <div id="availability-summary" class="summary"></div>
+  </header>
+
+  <main id="cocktail-grid" class="cocktail-grid">
+    <div class="loading">Loading cocktails...</div>
+  </main>
+
+  <div id="detail-overlay" class="detail-overlay hidden">
+    <div class="detail-card">
+      <button class="close-btn" id="close-detail">&times;</button>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <footer>
+    <p>Home Bar &mdash; What's on tap tonight</p>
+  </footer>
+
+  <script src="/static/menu.js"></script>
+</body>
+</html>

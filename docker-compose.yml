@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  homebar:
+    build: .
+    container_name: homebar
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - DATABASE_URL=sqlite:///./data/homebar.db
+      - BACKOFFICE_PASSWORD=changeme
+      - SECRET_KEY=change_this_to_a_random_secret
+      - AI_BASE_URL=https://api.deepseek.com
+      - AI_API_KEY=your-api-key-here
+      - AI_MODEL=deepseek-chat
+    restart: unless-stopped
