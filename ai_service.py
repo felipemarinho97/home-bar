@@ -12,7 +12,7 @@ def _get_config():
     }
 
 
-def _call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> str:
+def _call_ai(system_prompt: str, user_prompt: str) -> str:
     cfg = _get_config()
     if not cfg["api_key"]:
         raise RuntimeError("AI_API_KEY not configured")
@@ -24,7 +24,6 @@ def _call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> st
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": max_tokens,
     }).encode()
 
     req = Request(
@@ -52,10 +51,7 @@ def _call_ai(system_prompt: str, user_prompt: str, max_tokens: int = 2000) -> st
         if content and content.strip():
             finish_reason = choice.get("finish_reason", "unknown")
             if finish_reason == "length":
-                raise RuntimeError(
-                    "AI response was truncated (max_tokens limit). "
-                    "The recipe may be too complex — try again or simplify the input."
-                )
+                raise RuntimeError("AI response was truncated — try again.")
             return content.strip()
 
     finish_reasons = [c.get("finish_reason", "?") for c in choices]
@@ -111,7 +107,7 @@ Base spirit: {cocktail_data.get('base_spirit', 'not specified')}
 
 Write the preparation method."""
 
-    return _call_ai(METHOD_SYSTEM_PROMPT, user_prompt, max_tokens=2000)
+    return _call_ai(METHOD_SYSTEM_PROMPT, user_prompt)
 
 
 def generate_tags(cocktail_data: dict) -> list[str]:
@@ -126,7 +122,7 @@ Ingredients: {ingredients_text}
 
 Generate tags."""
 
-    result = _call_ai(TAGS_SYSTEM_PROMPT, user_prompt, max_tokens=200)
+    result = _call_ai(TAGS_SYSTEM_PROMPT, user_prompt)
     try:
         tags = json.loads(result)
         if isinstance(tags, list):
